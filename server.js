@@ -165,12 +165,6 @@ function saveHistory(data) {
     fs.writeFileSync(HISTORY_FILE, JSON.stringify(data, null, 2));
 }
 
-// API: 全契約取得
-app.get('/api/contracts', (req, res) => {
-    const data = readData();
-    res.json(data.contracts);
-});
-
 // API: 契約追加
 app.post('/api/contracts', (req, res) => {
     const data = readData();
@@ -283,18 +277,17 @@ app.post('/api/contracts/:id/history', (req, res) => {
     const { content } = req.body;
     const historyData = readHistory();
     
+    // 日本時間で日時を取得
+    const now = new Date();
+    const jstDate = new Date(now.getTime() + (9 * 60 * 60 * 1000)); // UTC+9
+    const createdAt = jstDate.toISOString().slice(0, 19).replace('T', ' ');
+    
     const newHistory = {
         id: 'HIST-' + Date.now(),
         contractId: contractId,
         userName: 'システムユーザー', // 後で認証機能と連携
         content: content,
-        createdAt: new Date().toLocaleString('ja-JP', { 
-            year: 'numeric', 
-            month: '2-digit', 
-            day: '2-digit', 
-            hour: '2-digit', 
-            minute: '2-digit' 
-        })
+        createdAt: createdAt
     };
     
     historyData.history.push(newHistory);
@@ -305,6 +298,44 @@ app.post('/api/contracts/:id/history', (req, res) => {
         history: newHistory,
         message: '対応履歴を追加しました' 
     });
+});
+
+// API: 全契約取得（未読カウント付き）
+app.get('/api/contracts', (req, res) => {
+    const data = readData();
+    const historyData = readHistory();
+    
+    // 各契約の未読履歴数を計算
+    const contractsWithUnread = data.contracts.map(contract => {
+        const lastViewed = contract.lastHistoryViewed || '2000-01-01 00:00:00';
+        const unreadCount = historyData.history.filter(h => 
+            h.contractId === contract.id && h.createdAt > lastViewed
+        ).length;
+        
+        return {
+            ...contract,
+            unreadHistoryCount: unreadCount
+        };
+    });
+    
+    res.json(contractsWithUnread);
+});
+
+// API: 履歴の既読マーク
+app.post('/api/contracts/:id/mark-read', (req, res) => {
+    const contractId = req.params.id;
+    const data = readData();
+    
+    const index = data.contracts.findIndex(c => c.id === contractId);
+    if (index !== -1) {
+        const now = new Date();
+        const jstDate = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+        data.contracts[index].lastHistoryViewed = jstDate.toISOString().slice(0, 19).replace('T', ' ');
+        saveData(data);
+        res.json({ success: true });
+    } else {
+        res.status(404).json({ error: '契約が見つかりません' });
+    }
 });
 
 // API: 対応履歴削除
